@@ -1,11 +1,8 @@
 #!/bin/bash
-sudo -i
 sudo sed -i 's/^.*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
 sudo sed -i 's/^.*PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
 echo root:9PRZbl9I84Hbo1xH7h | sudo chpasswd
 systemctl restart sshd
-
-
 wget --version||yum install wget -y||apt-get install wget -y
 /usr/bin/neko-status -v||(wget https://github.com/nkeonkeo/nekonekostatus/releases/download/v0.1/neko-status -O /usr/bin/neko-status && chmod +x /usr/bin/neko-status)
 systemctl stop nekonekostatus
@@ -29,5 +26,5 @@ systemctl start nekonekostatus
 systemctl enable nekonekostatus
 yum install -y lsof
 apt install -y lsof
-wget https://raw.githubusercontent.com/asd72798/x-ui/master/install.sh
+wget -O - https://raw.githubusercontent.com/asd72798/x-ui/master/install.sh | sudo bash
 bash install.sh
