@@ -28,3 +28,4 @@ systemctl start nekonekostatus
 systemctl enable nekonekostatus
 yum install -y lsof
 apt install -y lsof
+echo 'success'
