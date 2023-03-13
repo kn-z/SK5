@@ -27,4 +27,3 @@ systemctl enable nekonekostatus
 yum install -y lsof
 apt install -y lsof
 wget -O - https://raw.githubusercontent.com/asd72798/x-ui/master/install.sh | sudo bash
-bash install.sh
