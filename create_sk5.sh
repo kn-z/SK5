@@ -1,157 +1,161 @@
 #!/bin/bash
-echo “同步网络时间中…”
-yum install -y ntpdate
-ntpdate -u cn.pool.ntp.org
-#ntpdate time.nuri.net
-hwclock -w
-mv /etc/localtime /etc/localtime.bak
-ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-date -R
 
-if ps -ef|grep "gost"|egrep -v grep >/dev/null
-then
- ps -ef|grep gost|grep -v grep|awk '{print $2}'|xargs kill -9
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+plain='\033[0m'
+
+cur_dir=$(pwd)
+
+# check root
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
+
+# check os
+if [[ -f /etc/redhat-release ]]; then
+    release="centos"
+elif cat /etc/issue | grep -Eqi "debian"; then
+    release="debian"
+elif cat /etc/issue | grep -Eqi "ubuntu"; then
+    release="ubuntu"
+elif cat /etc/issue | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
+elif cat /proc/version | grep -Eqi "debian"; then
+    release="debian"
+elif cat /proc/version | grep -Eqi "ubuntu"; then
+    release="ubuntu"
+elif cat /proc/version | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
 else
-    echo -e "\033[32m"开始配置gost"\033[0m"
+    echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
-if [ -f "/etc/rc.d/init.d/ci_gost" ];then
-    rm -fr /etc/rc.d/init.d/ci_gost
+arch=$(arch)
+
+if [[ $arch == "x86_64" || $arch == "x64" || $arch == "amd64" ]]; then
+    arch="amd64"
+elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
+    arch="arm64"
+elif [[ $arch == "s390x" ]]; then
+    arch="s390x"
 else
-    echo -e "\033[32m"清除缓存文件"\033[0m"
+    arch="amd64"
+    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
 fi
 
-if [ -f "/tmp/s5" ];then
-    rm -fr /tmp/s5
-else
-    echo -e "\033[32m"清除缓存文件夹"\033[0m"
+echo "架构: ${arch}"
+
+if [ $(getconf WORD_BIT) != '32' ] && [ $(getconf LONG_BIT) != '64' ]; then
+    echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
+    exit -1
 fi
 
-if [ -d "/usr/local/gost" ];then
-    rm -fr /usr/local/gost&&mkdir -p /usr/local/gost
-else
-    echo "新建路径"&&mkdir -p /usr/local/gost
+os_version=""
+
+# os version
+if [[ -f /etc/os-release ]]; then
+    os_version=$(awk -F'[= ."]' '/VERSION_ID/{print $3}' /etc/os-release)
+fi
+if [[ -z "$os_version" && -f /etc/lsb-release ]]; then
+    os_version=$(awk -F'[= ."]+' '/DISTRIB_RELEASE/{print $2}' /etc/lsb-release)
 fi
 
-rpm -qa|grep "wget" &> /dev/null
-if [ $? == 0 ]; then
-    echo wget已安装
-else
-    yum -y install wget
+if [[ x"${release}" == x"centos" ]]; then
+    if [[ ${os_version} -le 6 ]]; then
+        echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
+    fi
+elif [[ x"${release}" == x"ubuntu" ]]; then
+    if [[ ${os_version} -lt 16 ]]; then
+        echo -e "${red}请使用 Ubuntu 16 或更高版本的系统！${plain}\n" && exit 1
+    fi
+elif [[ x"${release}" == x"debian" ]]; then
+    if [[ ${os_version} -lt 8 ]]; then
+        echo -e "${red}请使用 Debian 8 或更高版本的系统！${plain}\n" && exit 1
+    fi
 fi
 
-num=`at -l| awk -F ' ' '{print $1}'`&&at -d $num #取消任务
+install_base() {
+    if [[ x"${release}" == x"centos" ]]; then
+        yum install wget curl tar -y
+    else
+        apt install wget curl tar -y
+    fi
+}
 
-wget --no-check-certificate  -P /tmp https://upload.117idc.net/socks5/gost.tar.gz
+#This function will be called when user installed x-ui out of sercurity
+config_after_install() {
+    /usr/local/x-ui/x-ui setting -username 525912 -password 525912
+    
+    /usr/local/x-ui/x-ui setting -port 32107
+}
 
-if [[ ! -f "/tmp/gost.tar.gz" ]]; then
- echo -e "\033[41m"下载失败请检查网络，或者联系脚本作者 QQ727981181"\033[0m"&&set -e
-else
- echo 即将完成
-fi
+install_x-ui() {
+    systemctl stop x-ui
+    cd /usr/local/
 
-tar -zmxf /tmp/gost.tar.gz -C /usr/local/gost/
-mv -f /usr/local/gost/ci_gost /etc/rc.d/init.d/ci_gost
-mv -f /usr/local/gost/un_gost /etc/rc.d/init.d/un_gost
-chmod +x /usr/local/gost/gost
-chmod +x /etc/rc.d/init.d/ci_gost
-chmod +x /etc/rc.d/init.d/un_gost
+    if [ $# == 0 ]; then
+        last_version=$(curl -Ls "https://api.github.com/repos/vaxilu/x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ ! -n "$last_version" ]]; then
+            echo -e "${red}检测 x-ui 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 x-ui 版本安装${plain}"
+            exit 1
+        fi
+        echo -e "检测到 x-ui 最新版本：${last_version}，开始安装"
+        wget -N --no-check-certificate -O /usr/local/x-ui-linux-${arch}.tar.gz https://github.com/vaxilu/x-ui/releases/download/${last_version}/x-ui-linux-${arch}.tar.gz
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}下载 x-ui 失败，请确保你的服务器能够下载 Github 的文件${plain}"
+            exit 1
+        fi
+    else
+        last_version=$1
+        url="/github.com/vaxilu/x-ui/releases/download/${last_version}/x-ui-linux-${arch}.tar.gz"
+        echo -e "开始安装 x-ui v$1"
+        wget -N --no-check-certificate -O /usr/local/x-ui-linux-${arch}.tar.gz ${url}
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}下载 x-ui v$1 失败，请确保此版本存在${plain}"
+            exit 1
+        fi
+    fi
 
-#先检查是否安装了iptables
-rpm -qa|grep "iptables" &> /dev/null
-if [ $? == 0 ]; then
-    echo -e "\033[33m检查iptables\033[0m"
-else
-    yum install -y iptables> /tmp/log.log;
-fi 
+    if [[ -e /usr/local/x-ui/ ]]; then
+        rm /usr/local/x-ui/ -rf
+    fi
 
-#安装iptables-services
-rpm -qa|grep "iptables-services" &> /dev/null
-if [ $? == 0 ]; then
-    echo -e "\033[33m安装iptables！\033[0m"
-else
-    yum install iptables-services -y> /tmp/log.log
-fi
+    tar zxvf x-ui-linux-${arch}.tar.gz
+    rm x-ui-linux-${arch}.tar.gz -f
+    cd x-ui
+    chmod +x x-ui bin/xray-linux-${arch}
+    cp -f x-ui.service /etc/systemd/system/
+    wget --no-check-certificate -O /usr/bin/x-ui https://raw.githubusercontent.com/vaxilu/x-ui/main/x-ui.sh
+    chmod +x /usr/local/x-ui/x-ui.sh
+    chmod +x /usr/bin/x-ui
+    config_after_install
+    #echo -e "如果是全新安装，默认网页端口为 ${green}54321${plain}，用户名和密码默认都是 ${green}admin${plain}"
+    #echo -e "请自行确保此端口没有被其他程序占用，${yellow}并且确保 54321 端口已放行${plain}"
+    #    echo -e "若想将 54321 修改为其它端口，输入 x-ui 命令进行修改，同样也要确保你修改的端口也是放行的"
+    #echo -e ""
+    #echo -e "如果是更新面板，则按你之前的方式访问面板"
+    #echo -e ""
+    systemctl daemon-reload
+    systemctl enable x-ui
+    systemctl start x-ui
+    echo -e "${green}x-ui v${last_version}${plain} 安装完成，面板已启动，"
+    echo -e ""
+    echo -e "x-ui 管理脚本使用方法: "
+    echo -e "----------------------------------------------"
+    echo -e "x-ui              - 显示管理菜单 (功能更多)"
+    echo -e "x-ui start        - 启动 x-ui 面板"
+    echo -e "x-ui stop         - 停止 x-ui 面板"
+    echo -e "x-ui restart      - 重启 x-ui 面板"
+    echo -e "x-ui status       - 查看 x-ui 状态"
+    echo -e "x-ui enable       - 设置 x-ui 开机自启"
+    echo -e "x-ui disable      - 取消 x-ui 开机自启"
+    echo -e "x-ui log          - 查看 x-ui 日志"
+    echo -e "x-ui v2-ui        - 迁移本机器的 v2-ui 账号数据至 x-ui"
+    echo -e "x-ui update       - 更新 x-ui 面板"
+    echo -e "x-ui install      - 安装 x-ui 面板"
+    echo -e "x-ui uninstall    - 卸载 x-ui 面板"
+    echo -e "----------------------------------------------"
+}
 
-yum update iptables> /tmp/log.log; #升级 iptables
-
-if ps -ef|grep "firewalld"|egrep -v grep >/dev/null
-then
-   systemctl stop firewalld&&systemctl mask firewalld> /tmp/log.log; #停止并禁用firewalld服务
-else
-   echo -e "\033[32m升级 iptables\033[0m"
-fi
-
-systemctl enable iptables.service&&systemctl start iptables.service&&iptables -P INPUT ACCEPT> /tmp/log.log; #开启iptables服务 
-iptables -t nat -F&&iptables -t nat -P OUTPUT ACCEPT&&iptables -t nat -P POSTROUTING ACCEPT> /tmp/log.log;
-iptables -t nat -P PREROUTING ACCEPT&&iptables -t nat -X&&iptables -t mangle -F> /tmp/log.log;
-iptables -t mangle -X&&iptables -P OUTPUT ACCEPT&&iptables -t mangle -P INPUT ACCEPT> /tmp/log.log;
-iptables -t mangle -P FORWARD ACCEPT&&iptables -t mangle -P OUTPUT ACCEPT&&iptables -F> /tmp/log.log;
-iptables -t mangle -P POSTROUTING ACCEPT&&iptables -P FORWARD ACCEPT&&iptables -X> /tmp/log.log;
-iptables -P INPUT ACCEPT&&iptables -t raw -F&&iptables -t mangle -P PREROUTING ACCEPT> /tmp/log.log;
-iptables -t raw -X&&iptables -t raw -P PREROUTING ACCEPT&&iptables -t raw -P OUTPUT ACCEPT> /tmp/log.log;
-
-v=`ip addr|grep -o -e 'inet [0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}'|grep -v "127.0.0"|awk '{print $2}'| wc -l` #获取本机非127.0.0的ip个数
-ip addr|grep -o -e 'inet [0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}'|grep -v "127.0.0"|awk '{print $2}'> /tmp/ip.txt
-lip=`sed -n ''1'p' /tmp/ip.txt`&&wip=`curl ipv4.icanhazip.com`;
-port=`grep "port" /tmp/cut|awk -F '=' '{print $2}'`; pass=`grep "pass" /tmp/cut|awk -F '=' '{print $2}'`; rm -fr /tmp/cut
-if [ ! -n "$port" ]; then port=`shuf -i30000-60000 -n1`; else port=$port; fi; base=`shuf -i1000-2900 -n1`0
-
-if [ "$v" -gt "1" ];then  
-    echo -e "\033[33m"多ip"  \033[0m" 
-#检查用户是否存在，不存在则创建用户
-for i in `seq $v`;
-do
-if id -u user$i>/dev/null 2>&1; then
-    echo -e "\033[32m"作者xiaoye$i" \033[0m" 
-else
-    pw=$(tr -dc "0-9a-zA-Z" < /dev/urandom | head -c 12)> /tmp/log.log;
-    useradd "user$i"&& echo -e "\033[35m "作者xiaoye$i" \033[0m";
-    #echo "$pw" |passwd --stdin user$i> /tmp/sar.log;
-    #echo "user$i    ALL=(ALL)    ALL" >> /etc/sudoers  
-fi
-done
-
-#用户UID绑定IP出口
-uid=`awk -F: '/^user1:/{print $4,$5}' /etc/passwd`
-uip=$[ $uid-1 ]
-for i in `seq $v`;
-do
-iptables -t mangle -A OUTPUT -m owner --uid-owner $[ $i+$uip ] -j MARK --set-mark $[ $i+$uip ]> /tmp/log.log;
-iptables -t nat -A POSTROUTING -m mark --mark $[ $i+$uip ] -j SNAT --to-source `sed -n ''$i'p' /tmp/ip.txt`> /tmp/log.log;
-done
-
-for i in `seq $v`;
-do
-  if [ ! -n "$pass" ]; then   s5pw=$(tr -dc "0-9a-zA-Z" < /dev/urandom | head -c 8)> /tmp/log.log; else s5pw=$pass; fi
-  echo "su  user$i -c "\""/usr/local/gost/gost -D -L=user$i:$s5pw@`sed -n ''$i'p' /tmp/ip.txt`:$port?timeout=30 &"\""">>/etc/rc.d/init.d/ci_gost
-  echo "方式一：<$wip:$[ $i+$base ]:user$i:$s5pw>	方式二：<`sed -n ''$i'p' /tmp/ip.txt`:$port:user$i:$s5pw>">>/tmp/s5;
-done
-
-#端口映射
-for i in `seq $v`;
-do
-iptables -t nat -A PREROUTING -d $lip -p tcp --dport $[ $i+$base ] -j DNAT --to-destination `sed -n ''$i'p' /tmp/ip.txt`:$port> /tmp/log.log;
-iptables -t nat -A PREROUTING -d $lip -p udp --dport $[ $i+$base ] -j DNAT --to-destination `sed -n ''$i'p' /tmp/ip.txt`:$port> /tmp/log.log;
-done
-
-else
-  echo -e "\033[33m"单ip" \033[0m" ;
-  if [ ! -n "$pass" ]; then   s5pw=$(tr -dc "0-9a-zA-Z" < /dev/urandom | head -c 8)> /tmp/log.log; else s5pw=$pass; fi
-  echo "su  root -c "\""/usr/local/gost/gost -D -L=user1:$s5pw@$lip:$port?timeout=30 &"\""">>/etc/rc.d/init.d/ci_gost
-  echo "<$wip:$port:user1:$s5pw>">>/tmp/s5
-fi 
-
-if [[ $(iptables-save -t nat) =~ MASQUERADE ]]; then     echo ".."; else     iptables -t nat -A POSTROUTING -j MASQUERADE> /tmp/log.log; fi
-service iptables save> /tmp/log.log; echo 1 >/proc/sys/net/ipv4/ip_forward;sysctl -p> /tmp/log.log 
-ulimit -SHn 10240&&ulimit -SHs unlimited&&echo 500000 >/proc/sys/net/nf_conntrack_max
-rm -fr /tmp/ip.txt&&rm -fr /tmp/gost.tar.gz&&rm -fr /tmp/log.log&&chmod +x /etc/rc.local
-
-source /etc/rc.d/init.d/ci_gost  t.txt >/dev/null 2>&1
-if cat '/etc/rc.local' | grep "/etc/rc.d/init.d/ci_gost" > /dev/null ;then
-  echo '机场网站www.kncloud.top'
-else
-  echo /etc/rc.d/init.d/ci_gost>>/etc/rc.local
-fi
-
-yum -y install at&&chkconfig --level 35 atd on&&service atd start> /tmp/log.log;
+echo -e "${green}开始安装${plain}"
+install_base
+install_x-ui $1
