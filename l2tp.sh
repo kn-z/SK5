@@ -236,8 +236,6 @@ preinstall_l2tp(){
     echo "Client Remote IP Range:${iprange}.2-${iprange}.254"
     echo "PSK:${mypsk}"
     echo
-    echo "Press any key to start... or press Ctrl + C to cancel."
-    char=`get_char`
 
 }
 
