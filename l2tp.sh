@@ -456,27 +456,65 @@ EOF
 
 compile_install(){
 
-    rm -rf ${cur_dir}/l2tp
-    mkdir -p ${cur_dir}/l2tp
-    cd ${cur_dir}/l2tp
-    download_file "${libreswan_filename}.tar.gz"
-    tar -zxf ${libreswan_filename}.tar.gz
+    echo ">>> Installing Libreswan (auto-detect mode)..."
 
-    cd ${cur_dir}/l2tp/${libreswan_filename}
+    # 优先使用系统自带包
+    if [ -f /etc/debian_version ]; then
+        echo "Detected Debian/Ubuntu system."
+        if apt-get install -y libreswan; then
+            echo "Libreswan installed from apt successfully."
+        else
+            echo "apt install failed, falling back to source build..."
+            apt-get update -y
+            apt-get install -y make gcc libnss3-dev libnspr4-dev pkg-config \
+                libpam-dev libcap-ng-dev libcap-ng-utils libselinux-dev \
+                libcurl4-nss-dev flex bison libunbound-dev libevent-dev \
+                xmlto libsystemd-dev libnss3-tools
+            build_from_source=1
+        fi
+    elif [ -f /etc/redhat-release ]; then
+        echo "Detected RedHat-based system."
+        if dnf install -y libreswan; then
+            echo "Libreswan installed from dnf successfully."
+        else
+            echo "dnf install failed, falling back to source build..."
+            dnf install -y make gcc nss-devel nspr-devel pkgconf-pkg-config \
+                pam-devel libcap-ng-devel libselinux-devel curl-devel flex bison \
+                unbound-devel libevent-devel systemd-devel nss-tools
+            build_from_source=1
+        fi
+    else
+        echo "Unsupported system, will try source build."
+        build_from_source=1
+    fi
+
+    # --- 源码编译分支 ---
+    if [ "${build_from_source}" = "1" ]; then
+        echo ">>> Building Libreswan from source..."
+        rm -rf ${cur_dir}/l2tp
+        mkdir -p ${cur_dir}/l2tp
+        cd ${cur_dir}/l2tp
+        download_file "${libreswan_filename}.tar.gz"
+        tar -zxf ${libreswan_filename}.tar.gz
+        cd ${cur_dir}/l2tp/${libreswan_filename}
+
         cat > Makefile.inc.local <<'EOF'
 WERROR_CFLAGS =
 USE_DNSSEC = false
 USE_DH31 = false
 USE_GLIBC_KERN_FLIP_HEADERS = true
 EOF
-    make programs && make install
 
-    /usr/local/sbin/ipsec --version >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo "${libreswan_filename} install failed."
+        make programs && make install
+    fi
+
+    # --- 验证安装 ---
+    if ! /usr/local/sbin/ipsec --version >/dev/null 2>&1 && ! command -v ipsec >/dev/null 2>&1; then
+        echo "Libreswan install failed."
         exit 1
     fi
 
+    echo ">>> Libreswan install success."
     config_install
 
     cp -pf /etc/sysctl.conf /etc/sysctl.conf.bak
