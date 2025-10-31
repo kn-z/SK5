@@ -330,6 +330,44 @@ elif check_sys packageManager yum; then
         yum -y install ppp libreswan xl2tpd firewalld || dnf -y install ppp libreswan xl2tpd firewalld
         yum_install
     fi
+    else
+    # Amazon Linux 2023 及其他无 EPEL 的系统
+    if grep -qi "Amazon Linux" /etc/os-release; then
+        echo "Detected Amazon Linux 2023, installing dependencies for build..."
+        dnf -y groupinstall "Development Tools"
+        dnf -y install gmp-devel nss-devel nspr-devel pam-devel \
+                       libcap-ng-devel libselinux-devel libevent-devel \
+                       fipscheck-devel unbound-devel xmlto libpcap-devel \
+                       flex bison curl-devel iptables make
+
+        echo "Building and installing libreswan..."
+        cd /usr/src
+        curl -LO https://download.libreswan.org/libreswan-4.14.tar.gz
+        tar xzf libreswan-4.14.tar.gz
+        cd libreswan-4.14
+        make programs && make install
+
+        echo "Building and installing xl2tpd..."
+        cd /usr/src
+        curl -LO https://github.com/xelerance/xl2tpd/archive/v1.3.18.tar.gz
+        tar xzf v1.3.18.tar.gz
+        cd xl2tpd-1.3.18
+        make && make install
+
+        echo "Building and installing ppp..."
+        cd /usr/src
+        curl -LO https://download.samba.org/pub/ppp/ppp-2.4.9.tar.gz
+        tar xzf ppp-2.4.9.tar.gz
+        cd ppp-2.4.9
+        ./configure && make && make install
+
+        echo "All components built from source successfully!"
+        yum_install
+    else
+        # 对其他 DNF 系统仍用包管理器
+        yum -y install ppp libreswan xl2tpd firewalld || dnf -y install ppp libreswan xl2tpd firewalld
+        yum_install
+    fi
 fi
 }
 
