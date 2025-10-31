@@ -294,28 +294,43 @@ install_l2tp(){
         apt-get -y install xl2tpd
 
         compile_install
-    elif check_sys packageManager yum; then
+elif check_sys packageManager yum; then
+    echo "Checking for EPEL or Amazon Linux repository..."
+
+    # 检查是否为 Amazon Linux
+    if grep -qi "Amazon Linux" /etc/os-release; then
+        echo "Detected Amazon Linux system, skipping EPEL installation."
+        yum -y install dnf-utils || yum -y install yum-utils
+        echo "Amazon Linux uses its own repos. Proceeding with package installation..."
+    else
         echo "Adding the EPEL repository..."
         yum -y install epel-release yum-utils
-        [ ! -f /etc/yum.repos.d/epel.repo ] && echo "Install EPEL repository failed, please check it." && exit 1
+        if [ ! -f /etc/yum.repos.d/epel.repo ]; then
+            echo "Install EPEL repository failed, please check it."
+            exit 1
+        fi
         yum-config-manager --enable epel
         echo "Adding the EPEL repository complete..."
-
-        if centosversion 7; then
-            yum -y install ppp libreswan xl2tpd firewalld
-            yum_install
-        elif centosversion 6; then
-            yum -y remove libevent-devel
-            yum -y install libevent2-devel
-            yum -y install nss-devel nspr-devel pkgconfig pam-devel \
-                           libcap-ng-devel libselinux-devel lsof \
-                           curl-devel flex bison gcc ppp make iptables gmp-devel \
-                           fipscheck-devel unbound-devel xmlto libpcap-devel xl2tpd
-
-            compile_install
-        fi
     fi
 
+    # 安装依赖
+    if centosversion 7; then
+        yum -y install ppp libreswan xl2tpd firewalld
+        yum_install
+    elif centosversion 6; then
+        yum -y remove libevent-devel
+        yum -y install libevent2-devel
+        yum -y install nss-devel nspr-devel pkgconfig pam-devel \
+                       libcap-ng-devel libselinux-devel lsof \
+                       curl-devel flex bison gcc ppp make iptables gmp-devel \
+                       fipscheck-devel unbound-devel xmlto libpcap-devel xl2tpd
+        compile_install
+    else
+        # Amazon Linux 2023、Rocky 8、Alma 9 等新系统的通用逻辑
+        yum -y install ppp libreswan xl2tpd firewalld || dnf -y install ppp libreswan xl2tpd firewalld
+        yum_install
+    fi
+fi
 }
 
 config_install(){
